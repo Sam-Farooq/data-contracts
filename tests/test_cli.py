@@ -302,3 +302,46 @@ def test_no_command_at_all_is_a_usage_error():
     with pytest.raises(SystemExit) as exc:
         main([])
     assert exc.value.code == 2
+
+
+# --- flag placement --------------------------------------------------------
+
+
+def test_a_global_flag_works_after_the_subcommand_too():
+    """How the README writes it, and how anyone types it the first time."""
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        ["check", "--registry", REGISTRY, "--format", "json", "--consumers"], out=out, err=err
+    )
+    assert code == OK
+    assert json.loads(out.getvalue())["ok"] is True
+
+
+def test_a_global_flag_still_works_before_the_subcommand():
+    out, err = io.StringIO(), io.StringIO()
+    code = main(["--registry", REGISTRY, "--format", "json", "check"], out=out, err=err)
+    assert code == OK
+    assert json.loads(out.getvalue())["ok"] is True
+
+
+def test_a_subcommand_that_was_not_given_the_flag_does_not_overwrite_it():
+    """The argparse trap this fix exists for: a parent parser's default landing
+    on top of a value the top level already parsed."""
+    out, err = io.StringIO(), io.StringIO()
+    assert main(["--registry", REGISTRY, "validate"], out=out, err=err) == OK
+    assert "3 subjects" in out.getvalue()
+
+
+def test_the_later_placement_wins_when_both_are_given():
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        ["--registry", "/no/such/registry", "validate", "--registry", REGISTRY], out=out, err=err
+    )
+    assert code == OK
+
+
+def test_the_default_registry_is_relative_and_needs_no_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out, err = io.StringIO(), io.StringIO()
+    assert main(["validate"], out=out, err=err) == REFUSED
+    assert "registry is not a directory" in err.getvalue()

@@ -37,21 +37,45 @@ class Refused(ContractError):
     """Something the user has to fix before there is a question to answer."""
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="contractlint",
-        description="Decide whether a schema change breaks the people reading it.",
-    )
-    parser.add_argument(
+DEFAULTS = {"registry": "registry", "format": "text"}
+
+
+def _global_flags() -> argparse.ArgumentParser:
+    """Flags accepted on either side of the subcommand.
+
+    They default to SUPPRESS rather than to a value, so a subparser that was not
+    given one does not write its own default over what the top level parsed. That
+    is the whole reason this is a parent parser rather than two copies.
+    """
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
         "--registry",
-        default="registry",
         metavar="DIR",
+        default=argparse.SUPPRESS,
         help="the registry directory (default: registry)",
     )
-    parser.add_argument("--format", choices=("text", "json"), default="text", help="output shape")
+    common.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default=argparse.SUPPRESS,
+        help="output shape (default: text)",
+    )
+    return common
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = _global_flags()
+    parser = argparse.ArgumentParser(
+        prog="contractlint",
+        parents=[common],
+        description="Decide whether a schema change breaks the people reading it.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    check = sub.add_parser("check", help="judge a change against a subject's policy")
+    def add(name: str, **kw: str) -> argparse.ArgumentParser:
+        return sub.add_parser(name, parents=[common], **kw)
+
+    check = add("check", help="judge a change against a subject's policy")
     check.add_argument("subject", nargs="?", help="omit to check every subject's latest version")
     check.add_argument(
         "--proposed", metavar="FILE", help="a candidate schema file, rather than the latest version"
@@ -70,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose", action="store_true", help="list the changes even when the policy passes"
     )
 
-    diff = sub.add_parser("diff", help="print what changed between two versions")
+    diff = add("diff", help="print what changed between two versions")
     diff.add_argument("subject")
     diff.add_argument("from_version", type=int, metavar="FROM")
     diff.add_argument("to_version", type=int, nargs="?", metavar="TO", help="default: the latest")
@@ -78,17 +102,17 @@ def build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--strict", action="store_true")
     diff.add_argument("--cosmetic", action="store_true")
 
-    consumers = sub.add_parser("consumers", help="name the consumers a change breaks")
+    consumers = add("consumers", help="name the consumers a change breaks")
     consumers.add_argument("subject")
     consumers.add_argument("--proposed", metavar="FILE")
     consumers.add_argument("--strict", action="store_true")
 
-    show = sub.add_parser("show", help="print one version, normalized")
+    show = add("show", help="print one version, normalized")
     show.add_argument("subject")
     show.add_argument("--version", type=int, help="default: the latest")
 
-    sub.add_parser("validate", help="check the registry itself")
-    sub.add_parser("rules", help="print the rule table")
+    add("validate", help="check the registry itself")
+    add("rules", help="print the rule table")
     return parser
 
 
@@ -333,6 +357,9 @@ COMMANDS = {
 
 def main(argv: Sequence[str] | None = None, out=None, err=None) -> int:
     args = build_parser().parse_args(argv)
+    for name, fallback in DEFAULTS.items():
+        if not hasattr(args, name):
+            setattr(args, name, fallback)
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr
     try:
