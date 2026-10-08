@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-contracts"
+# The rule table is settled and the directions are tested case by case. What is
+# not settled is the shape of consumers.toml: `reads` wants glob support for
+# nested paths and `upgrade` wants a fourth mode for a consumer that is allowed
+# to lag by a bounded number of versions. Both change a file people would have
+# written by then, so this stays pre-1.0.
+version = "0.10.4"
+description = "A compatibility checker for schema changes, with a consumer registry that names who breaks"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.8.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.16.10"]
+
+[project.scripts]
+contractlint = "contractlint.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["contractlint*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
