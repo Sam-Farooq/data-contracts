@@ -90,11 +90,11 @@ RULES: dict[ChangeKind, Rule] = {
         "the new reader skips a field the old writer still sends, and the old reader "
         "falls back to the default it already declared",
     ),
-    # Wrong in this commit. Fixed, with the reasoning, two commits later.
     ChangeKind.FIELD_REMOVED_REQUIRED: _rule(
         ChangeKind.FIELD_REMOVED_REQUIRED,
-        BACKWARD,
-        "the field is gone and whoever needed it no longer gets it",
+        FORWARD,
+        "the old reader still needs the field, the new writer stopped sending it, and "
+        "the old reader declared no default to fall back to",
     ),
     ChangeKind.FIELD_RENAMED_WITH_ALIAS: _rule(
         ChangeKind.FIELD_RENAMED_WITH_ALIAS,

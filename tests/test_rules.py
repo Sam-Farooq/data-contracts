@@ -90,7 +90,7 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any], tuple[ChangeKind, ...], s
         avro(field("x", "string"), field("y", "long")),
         ONE,
         (K.FIELD_REMOVED_REQUIRED,),
-        BW,
+        FW,
     ),
     (
         "widen int to long",
@@ -279,14 +279,14 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any], tuple[ChangeKind, ...], s
         avro(field("amount", "long")),
         avro(field("amount_minor", "long")),
         (K.FIELD_REMOVED_REQUIRED, K.FIELD_ADDED_REQUIRED, K.LIKELY_RENAME),
-        BW,
+        BOTH,
     ),
     (
         "rename with no alias where the new field has a default",
         avro(field("amount", "long")),
         avro(field("amount_minor", "long", default=0)),
         (K.FIELD_REMOVED_REQUIRED, K.FIELD_ADDED_OPTIONAL, K.LIKELY_RENAME),
-        BW,
+        FW,
     ),
     (
         "widen the item type of an array",

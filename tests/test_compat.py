@@ -40,6 +40,16 @@ def test_the_labels_carry_the_versions():
     assert v.to_label == "test.subject v4"
 
 
+def test_blockers_name_only_the_changes_that_cost_a_required_direction():
+    old = doc(avro(field("x", "long"), field("drop_me", "string")))
+    new = doc(avro(field("x", "int")), version=2)
+    v = verdict_for(old, new)
+    backward = v.blockers(Policy.BACKWARD.directions)
+    assert [c.path for c in backward] == ["x"]
+    forward = v.blockers(Policy.FORWARD.directions)
+    assert [c.path for c in forward] == ["drop_me"]
+
+
 def test_cosmetic_and_hint_changes_are_separated_from_the_substantive_ones():
     old = doc(avro(field("a", "long", doc="before")))
     new = doc(avro(field("b", "long", doc="before")), version=2)
