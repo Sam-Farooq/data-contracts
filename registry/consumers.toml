@@ -1,0 +1,74 @@
+# Who reads what, and when they upgrade.
+#
+# Hand authored for this repository. These are not real services and nothing
+# here was discovered from a running system; the file exists because the impact
+# rules need a shape to work on, and this is the shape a real one has.
+#
+# `upgrade` is the field a schema cannot carry and the one that decides which
+# direction a consumer needs:
+#
+#   lagging   stays on its pinned schema while the producer moves      needs forward
+#   lockstep  deploys with the producer, then drains what is in flight needs backward
+#   replay    re-reads retained history with the new schema            needs both
+#
+# `reads` defaults to ["*"], which means the consumer deserializes with its
+# whole pinned schema and any resolution failure reaches it. Listing fields is a
+# claim that the consumer resolves only those, which is true of a projecting
+# reader and false of one that hands the broker its full schema.
+
+[[consumer]]
+name = "fraud-scoring"
+subject = "payments.transaction"
+version = 3
+upgrade = "lagging"
+owner = "risk"
+reads = [
+  "transaction_id",
+  "account_id",
+  "amount_minor",
+  "currency",
+  "occurred_at",
+  "channel",
+]
+
+[[consumer]]
+name = "warehouse-loader"
+subject = "payments.transaction"
+version = 3
+upgrade = "replay"
+owner = "data-platform"
+# Loads the whole retained history on a backfill and resolves every field, so
+# the conservative default is the honest declaration here.
+reads = ["*"]
+
+[[consumer]]
+name = "settlement-recon"
+subject = "payments.transaction"
+version = 2
+upgrade = "lagging"
+owner = "payments-ops"
+reads = ["transaction_id", "amount_minor", "settled_at"]
+
+[[consumer]]
+name = "card-notifications"
+subject = "payments.transaction"
+version = 3
+upgrade = "lockstep"
+owner = "growth"
+reads = ["transaction_id", "account_id", "amount_minor", "currency", "merchant.merchant_id"]
+
+[[consumer]]
+name = "crm-sync"
+subject = "crm.account"
+version = 2
+upgrade = "lagging"
+owner = "data-platform"
+reads = ["account_id", "segment", "tier", "closed_at"]
+
+[[consumer]]
+name = "relevance-dashboard"
+subject = "search.query_log"
+version = 2
+upgrade = "lagging"
+owner = "search"
+reads = ["query_id", "latency_ms", "result_count", "hits.score"]

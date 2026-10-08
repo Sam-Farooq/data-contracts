@@ -20,12 +20,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from contractlint.compat import Policy
+from contractlint.consumers import ALL_FIELDS, Consumer
 from contractlint.errors import RegistryError, SchemaError
 from contractlint.loader import load_schema_file
 from contractlint.types import Kind, SchemaDoc, TypeNode
 
 VERSION_FILE = re.compile(r"^v(\d+)\.(avsc|schema\.json)$")
 SUBJECT_CONFIG = "subject.toml"
+CONSUMER_FILE = "consumers.toml"
 
 
 class Problem(BaseModel):
@@ -84,6 +86,7 @@ class Registry(BaseModel):
 
     root: str
     subjects: dict[str, Subject]
+    consumers: tuple[Consumer, ...] = ()
     problems: tuple[Problem, ...] = ()
 
     @property
@@ -93,6 +96,9 @@ class Registry(BaseModel):
     @property
     def warnings(self) -> tuple[Problem, ...]:
         return tuple(p for p in self.problems if p.level == "warning")
+
+    def consumers_of(self, subject: str) -> tuple[Consumer, ...]:
+        return tuple(c for c in self.consumers if c.subject == subject)
 
     def subject(self, name: str) -> Subject:
         try:
@@ -212,4 +218,102 @@ def load_registry(root: str | Path) -> Registry:
             subjects[subject.name] = subject
     if not subjects and not problems:
         problems.append(Problem(level="warning", where=str(base), message="no subjects"))
-    return Registry(root=str(base), subjects=subjects, problems=tuple(problems))
+    consumers = _load_consumers(base, subjects, problems)
+    return Registry(
+        root=str(base),
+        subjects=subjects,
+        consumers=consumers,
+        problems=tuple(problems),
+    )
+
+
+def _load_consumers(
+    base: Path, subjects: dict[str, Subject], problems: list[Problem]
+) -> tuple[Consumer, ...]:
+    """Read consumers.toml, if there is one, and check it against the subjects.
+
+    A consumer pinned to a version that is not there, or claiming to read a field
+    that its pinned version does not define, is an error. Both are stale
+    declarations, and a stale declaration makes the impact report wrong in the
+    direction that matters: it under-reports.
+    """
+    path = base / CONSUMER_FILE
+    if not path.exists():
+        return ()
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        problems.append(Problem(level="error", where=CONSUMER_FILE, message=str(exc)))
+        return ()
+
+    entries = raw.get("consumer", [])
+    if not isinstance(entries, list):
+        problems.append(
+            Problem(level="error", where=CONSUMER_FILE, message="consumer must be a list of tables")
+        )
+        return ()
+
+    consumers: list[Consumer] = []
+    seen: set[str] = set()
+    for entry in entries:
+        try:
+            consumer = Consumer(**entry)
+        except (ValidationError, TypeError) as exc:
+            where = f"{CONSUMER_FILE}:{entry.get('name', '?') if isinstance(entry, dict) else '?'}"
+            detail = (
+                "; ".join(
+                    f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:2]
+                )
+                if isinstance(exc, ValidationError)
+                else str(exc)
+            )
+            problems.append(Problem(level="error", where=where, message=detail))
+            continue
+
+        where = f"{CONSUMER_FILE}:{consumer.name}"
+        if consumer.name in seen:
+            problems.append(Problem(level="error", where=where, message="duplicate consumer name"))
+            continue
+        seen.add(consumer.name)
+
+        subject = subjects.get(consumer.subject)
+        if subject is None:
+            problems.append(
+                Problem(
+                    level="error",
+                    where=where,
+                    message=f"reads {consumer.subject!r}, which is not a subject here",
+                )
+            )
+            continue
+        pinned = subject.versions.get(consumer.version)
+        if pinned is None:
+            problems.append(
+                Problem(
+                    level="error",
+                    where=where,
+                    message=f"pinned to v{consumer.version}, and the subject holds "
+                    f"{sorted(subject.versions)}",
+                )
+            )
+            continue
+        for read in consumer.reads:
+            if read != ALL_FIELDS and not field_at(pinned, read):
+                problems.append(
+                    Problem(
+                        level="error",
+                        where=where,
+                        message=f"reads {read!r}, which v{consumer.version} does not define",
+                    )
+                )
+        if consumer.version < subject.latest_version and consumer.upgrade.value == "lockstep":
+            problems.append(
+                Problem(
+                    level="warning",
+                    where=where,
+                    message=f"claims to upgrade in lockstep and is pinned to v{consumer.version} "
+                    f"while the subject is on v{subject.latest_version}, so it is lagging",
+                )
+            )
+        consumers.append(consumer)
+    return tuple(consumers)
