@@ -1,0 +1,128 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Nothing in here reaches a network beyond the package index. There is no broker,
+# no registry server and no schema service, because the whole question is whether
+# two files in the working tree agree.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+
+      # The offline claim rests on the install being this small. A schema library
+      # creeping into the base install would make the suite pass for a reason
+      # nobody intended, and one of them talks to a registry over HTTP.
+      - name: nothing but pydantic came in
+        run: |
+          python - <<'PY'
+          import importlib.util
+
+          present = [
+              name
+              for name in ("jsonschema", "fastavro", "avro", "confluent_kafka", "requests", "httpx")
+              if importlib.util.find_spec(name) is not None
+          ]
+          assert not present, f"the base install pulled in {present}"
+          PY
+
+  gate:
+    # The action is half the product, so CI runs it rather than describing it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: committed
+        uses: ./action
+        with:
+          registry: registry
+
+      - name: the committed registry passes its own gate
+        run: test "${{ steps.committed.outputs.ok }}" = "true"
+
+      - name: and the report is there to read
+        run: |
+          test -s "${{ steps.committed.outputs.report }}"
+          python -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['ok'] is True" \
+            "${{ steps.committed.outputs.report }}"
+
+      - id: drop_channel
+        continue-on-error: true
+        uses: ./action
+        with:
+          subject: payments.transaction
+          proposed: proposals/payments.transaction.v4-drop-channel.avsc
+          report: drop-channel.json
+
+      - name: dropping the channel enum is caught by the consumers, not by the policy
+        run: |
+          test "${{ steps.drop_channel.outputs.ok }}" = "false"
+          python - <<'PY'
+          import json
+
+          report = json.load(open("drop-channel.json"))
+          assert report["policy_ok"] is True, "the backward policy should allow a removal"
+          assert report["consumers_ok"] is False
+          broke = sorted(c["consumer"] for c in report["consumers"] if c["broken"])
+          assert broke == ["fraud-scoring", "warehouse-loader"], broke
+          PY
+
+  numbers:
+    # Every number the README quotes, asserted through the CLI. The prose can go
+    # stale on its own; this is what stops it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install .
+
+      - name: 25 rules, 3 subjects, 7 versions, 6 consumers
+        run: |
+          contractlint rules | head -1 | grep -qx "25 rules"
+          contractlint validate | grep -qx "3 subjects, 7 versions, 6 consumers"
+
+      - name: a field coming back with another type fails against v1 and passes against v3
+        run: |
+          code=0
+          contractlint check payments.transaction \
+            --proposed proposals/payments.transaction.v4-fee-returns.avsc > fee.txt || code=$?
+          cat fee.txt
+          test "$code" -eq 1
+          grep -q "FAIL  v1 -> v4" fee.txt
+          grep -q "ok    v3 -> v4" fee.txt
+
+      - name: a new required property fails the policy and reaches no consumer
+        run: |
+          code=0
+          contractlint check crm.account \
+            --proposed proposals/crm.account.v3-require-region.schema.json \
+            --consumers > region.txt || code=$?
+          cat region.txt
+          test "$code" -eq 1
+          grep -q "field_added_required" region.txt
+          grep -q "0 of 1 consumers break" region.txt
+
+      - name: a refusal is exit 2, not a pass
+        run: |
+          code=0
+          contractlint check no.such.subject > /dev/null 2>&1 || code=$?
+          test "$code" -eq 2
+
+      - name: the action script runs the same way on a laptop
+        run: |
+          CONTRACTLINT_REGISTRY=registry bash action/run.sh

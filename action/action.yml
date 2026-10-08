@@ -1,0 +1,73 @@
+name: data-contracts
+description: >-
+  Fail a build when a schema change breaks its subject's compatibility policy, or
+  breaks a consumer declared in the registry.
+author: Ahtisham Farooq
+
+inputs:
+  registry:
+    description: The registry directory, relative to the workspace.
+    required: false
+    default: registry
+  subject:
+    description: One subject to check. The default checks every subject.
+    required: false
+    default: ""
+  proposed:
+    description: A candidate schema file to judge instead of the subject's latest version.
+    required: false
+    default: ""
+  consumers:
+    description: Fail when a declared consumer breaks, as well as when the policy is violated.
+    required: false
+    default: "true"
+  strict:
+    description: >-
+      Count the quiet changes as failures: a changed default, an enum symbol that
+      resolves to a fallback.
+    required: false
+    default: "false"
+  report:
+    description: Where to write the JSON report.
+    required: false
+    default: contractlint-report.json
+  python-version:
+    description: Python to install contractlint under.
+    required: false
+    default: "3.11"
+
+outputs:
+  ok:
+    description: '"true" when no policy and no declared consumer was broken.'
+    value: ${{ steps.gate.outputs.ok }}
+  report:
+    description: Path to the JSON report, which is written whether the gate passes or not.
+    value: ${{ steps.gate.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # The action lives in a subdirectory of the package it installs, so its
+    # parent is the project root whether this is used as ./action from inside
+    # the repository or as <owner>/data-contracts/action@<ref> from outside.
+    - name: install contractlint
+      shell: bash
+      run: python -m pip install --disable-pip-version-check "${GITHUB_ACTION_PATH}/.."
+
+    # Inputs are passed as environment variables rather than interpolated into
+    # the script. A subject or a path is attacker-controlled on a fork pull
+    # request, and ${{ }} inside a shell line is a command injection.
+    - id: gate
+      shell: bash
+      env:
+        CONTRACTLINT_REGISTRY: ${{ inputs.registry }}
+        CONTRACTLINT_SUBJECT: ${{ inputs.subject }}
+        CONTRACTLINT_PROPOSED: ${{ inputs.proposed }}
+        CONTRACTLINT_CONSUMERS: ${{ inputs.consumers }}
+        CONTRACTLINT_STRICT: ${{ inputs.strict }}
+        CONTRACTLINT_REPORT: ${{ inputs.report }}
+      run: bash "${GITHUB_ACTION_PATH}/run.sh"

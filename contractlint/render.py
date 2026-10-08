@@ -174,7 +174,7 @@ def render_impacts(impacts: Sequence[ConsumerImpact], *, strict: bool = False) -
     if broken:
         lines.append("fail: " + ", ".join(sorted(i.consumer.name for i in broken)))
     else:
-        lines.append("pass: every declared consumer can still read this subject")
+        lines.append("pass: every declared consumer can still read what it is pinned to")
     return "\n".join(lines)
 
 

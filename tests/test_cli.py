@@ -175,7 +175,7 @@ def test_consumers_exits_nonzero_when_one_breaks():
 def test_consumers_with_no_proposal_judges_what_is_committed():
     code, out, _ = run("consumers", "payments.transaction")
     assert code == OK
-    assert "pass: every declared consumer can still read this subject" in out
+    assert "pass: every declared consumer can still read what it is pinned to" in out
 
 
 def test_consumers_reports_which_versions_each_one_was_compared_against():
