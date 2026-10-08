@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "crm.account v1",
+  "type": "object",
+  "required": ["account_id", "opened_at", "country"],
+  "properties": {
+    "account_id": {"type": "string"},
+    "opened_at": {"type": "string", "format": "date-time"},
+    "country": {"type": "string", "description": "ISO 3166-1 alpha-2"},
+    "segment": {
+      "type": "string",
+      "enum": ["smb", "mid_market", "enterprise"],
+      "default": "smb"
+    },
+    "tier": {"type": "integer", "default": 0},
+    "tags": {"type": "object", "additionalProperties": {"type": "string"}, "default": {}}
+  }
+}

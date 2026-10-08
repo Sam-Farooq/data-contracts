@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "search.query_log v2",
+  "type": "object",
+  "required": ["query_id", "query_text", "result_count", "latency_ms"],
+  "properties": {
+    "query_id": {"type": "string"},
+    "query_text": {"type": "string"},
+    "result_count": {"type": "integer"},
+    "latency_ms": {
+      "type": "number",
+      "description": "Widened from integer, which costs forward compatibility and is why this subject is backward only."
+    },
+    "filters": {"type": "object", "additionalProperties": {"type": "string"}, "default": {}},
+    "hits": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "required": ["doc_id", "score"],
+        "properties": {
+          "doc_id": {"type": "string"},
+          "score": {"type": "number"}
+        }
+      }
+    }
+  }
+}

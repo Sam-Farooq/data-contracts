@@ -1,0 +1,35 @@
+{
+  "type": "record",
+  "name": "Transaction",
+  "namespace": "payments",
+  "doc": "Drops fee_minor and adds settled_at.",
+  "fields": [
+    {"name": "transaction_id", "type": "string"},
+    {"name": "account_id", "type": "string"},
+    {
+      "name": "amount_minor",
+      "type": "long",
+      "doc": "Amount in the currency's minor units. Integer on purpose."
+    },
+    {"name": "currency", "type": "string", "doc": "ISO 4217 alphabetic code"},
+    {
+      "name": "occurred_at",
+      "type": {"type": "long", "logicalType": "timestamp-millis"}
+    },
+    {
+      "name": "channel",
+      "type": {
+        "type": "enum",
+        "name": "Channel",
+        "symbols": ["CARD", "TRANSFER", "DIRECT_DEBIT"]
+      }
+    },
+    {"name": "mcc", "type": ["null", "string"], "default": null},
+    {
+      "name": "settled_at",
+      "type": ["null", {"type": "long", "logicalType": "timestamp-millis"}],
+      "default": null,
+      "doc": "Null until the settlement file lands."
+    }
+  ]
+}

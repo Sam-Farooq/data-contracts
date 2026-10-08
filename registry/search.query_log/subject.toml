@@ -1,0 +1,5 @@
+# Hand authored for this repository. These are not logs; no query was ever run.
+
+compatibility = "backward"
+owner = "search"
+description = "One search request and what came back, as the query log records it"

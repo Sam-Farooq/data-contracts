@@ -1,0 +1,34 @@
+{
+  "type": "record",
+  "name": "Transaction",
+  "namespace": "payments",
+  "doc": "The first version. Keeps fee_minor, which v2 drops.",
+  "fields": [
+    {"name": "transaction_id", "type": "string"},
+    {"name": "account_id", "type": "string"},
+    {
+      "name": "amount_minor",
+      "type": "long",
+      "doc": "Amount in the currency's minor units. Integer on purpose."
+    },
+    {"name": "currency", "type": "string", "doc": "ISO 4217 alphabetic code"},
+    {
+      "name": "occurred_at",
+      "type": {"type": "long", "logicalType": "timestamp-millis"}
+    },
+    {
+      "name": "channel",
+      "type": {
+        "type": "enum",
+        "name": "Channel",
+        "symbols": ["CARD", "TRANSFER", "DIRECT_DEBIT"]
+      }
+    },
+    {
+      "name": "fee_minor",
+      "type": "long",
+      "doc": "Required here, with no default, which is what makes its removal in v2 visible to a forward reader."
+    },
+    {"name": "mcc", "type": ["null", "string"], "default": null}
+  ]
+}

@@ -1,0 +1,8 @@
+# Hand authored for this repository. Nothing in this directory was exported from
+# a broker, a registry server or a running producer, and no payload has ever
+# been serialized against it. The schemas exist so the rules have something
+# concrete to be checked against.
+
+compatibility = "backward_transitive"
+owner = "payments-platform"
+description = "One card or bank transaction, as the ledger accepted it"

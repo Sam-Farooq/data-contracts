@@ -1,0 +1,6 @@
+# Hand authored for this repository, like every other schema here. No CRM was
+# read to produce it.
+
+compatibility = "full"
+owner = "crm-platform"
+description = "Current state of one account, as the CRM export presents it"
