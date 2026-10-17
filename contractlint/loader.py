@@ -146,9 +146,49 @@ def _avro_type(node: Any, *, path: str, source: str | None) -> TypeNode:
         )
 
     if declared in AVRO_PRIMITIVES:
+        if logical == "decimal":
+            precision, scale = _decimal_digits(node, path=path, source=source)
+            return TypeNode(
+                kind=AVRO_PRIMITIVES[declared],
+                logical=logical,
+                precision=precision,
+                scale=scale,
+            )
         return TypeNode(kind=AVRO_PRIMITIVES[declared], logical=logical)
 
     raise SchemaError(f"unsupported Avro type {declared!r}", path=path, source=source)
+
+
+def _decimal_digits(node: dict[str, Any], *, path: str, source: str | None) -> tuple[int, int]:
+    """A decimal's precision and scale, checked at load time.
+
+    The specification makes precision required and defaults scale to 0. Both are
+    validated here rather than compared later: a decimal with no precision has
+    no range, and a scale past its precision describes no number, so neither is
+    something to carry forward and diff.
+    """
+    precision = node.get("precision")
+    if not isinstance(precision, int):
+        raise SchemaError(
+            "a decimal needs an integer precision; without one the unscaled "
+            "integer on the wire has no range",
+            path=path,
+            source=source,
+        )
+    if precision < 1:
+        raise SchemaError(
+            f"a decimal precision must be at least 1, got {precision}", path=path, source=source
+        )
+    scale = node.get("scale", 0)
+    if not isinstance(scale, int):
+        raise SchemaError("a decimal scale must be an integer", path=path, source=source)
+    if not 0 <= scale <= precision:
+        raise SchemaError(
+            f"a decimal scale must be between 0 and its precision {precision}, got {scale}",
+            path=path,
+            source=source,
+        )
+    return precision, scale
 
 
 def _avro_fields(record: Any, *, path: str, source: str | None) -> tuple[FieldNode, ...]:
