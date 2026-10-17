@@ -15,6 +15,8 @@ from contractlint.types import (
     SchemaDoc,
     TypeNode,
     readable_as,
+    split_logical,
+    unit_factor,
 )
 
 
@@ -145,6 +147,8 @@ def _diff_type(old: TypeNode, new: TypeNode, *, path: str, out: list[Change], di
     elif not old.nullable and new.nullable:
         out.append(change(ChangeKind.NULLABILITY_ADDED, path, f"{old.label()} -> {new.label()}"))
 
+    _diff_logical(old, new, path=path, out=out)
+
     if old.kind is not new.kind:
         if old.kind in CONTAINER_KINDS or new.kind in CONTAINER_KINDS:
             out.append(
@@ -166,6 +170,68 @@ def _diff_type(old: TypeNode, new: TypeNode, *, path: str, out: list[Change], di
         _diff_type(old.values, new.values, path=f"{path}{{}}", out=out, dialect=dialect)
     elif old.kind is Kind.ENUM:
         _diff_enum(old, new, path=path, out=out, dialect=dialect)
+
+
+def _diff_logical(old: TypeNode, new: TypeNode, *, path: str, out: list[Change]) -> None:
+    """Compare the annotation sitting over the physical type.
+
+    This is the one part of the walk the kind comparison cannot do for us. A
+    logical type does not change the bytes, so two schemas that disagree about
+    it resolve perfectly and hand a reader a wrong value. It runs before the
+    kind comparison and independently of it, the same way nullability does,
+    because an annotation can change with or without the type under it.
+    """
+    if old.logical == new.logical:
+        _diff_decimal(old, new, path=path, out=out)
+        return
+    if old.logical is None:
+        out.append(change(ChangeKind.LOGICAL_TYPE_ADDED, path, f"{old.label()} -> {new.label()}"))
+        return
+    if new.logical is None:
+        out.append(change(ChangeKind.LOGICAL_TYPE_REMOVED, path, f"{old.label()} -> {new.label()}"))
+        return
+
+    old_family, old_unit = split_logical(old.logical)
+    new_family, new_unit = split_logical(new.logical)
+    if old_family == new_family and old_unit is not None and new_unit is not None:
+        factor = unit_factor(old_unit, new_unit)
+        out.append(
+            change(
+                ChangeKind.LOGICAL_UNIT_CHANGED,
+                path,
+                f"{old.logical} -> {new.logical}, a factor of {factor} on every value "
+                "already written",
+            )
+        )
+        return
+    out.append(change(ChangeKind.LOGICAL_TYPE_CHANGED, path, f"{old.logical} -> {new.logical}"))
+
+
+def _diff_decimal(old: TypeNode, new: TypeNode, *, path: str, out: list[Change]) -> None:
+    """Scale and precision, for the two sides that agree they are decimals.
+
+    Only reached when the annotation itself did not change, so either both sides
+    are decimals and carry digits, or neither does and there is nothing here.
+    """
+    if old.scale is None or new.scale is None or old.precision is None or new.precision is None:
+        return
+    if old.scale != new.scale:
+        factor = 10 ** abs(new.scale - old.scale)
+        out.append(
+            change(
+                ChangeKind.DECIMAL_SCALE_CHANGED,
+                path,
+                f"scale {old.scale} -> {new.scale}, a factor of {factor} on every value "
+                "already written",
+            )
+        )
+    if old.precision != new.precision:
+        kind = (
+            ChangeKind.DECIMAL_PRECISION_WIDENED
+            if new.precision > old.precision
+            else ChangeKind.DECIMAL_PRECISION_NARROWED
+        )
+        out.append(change(kind, path, f"precision {old.precision} -> {new.precision}"))
 
 
 def _diff_primitive_kind(old: TypeNode, new: TypeNode, *, path: str, out: list[Change]) -> None:

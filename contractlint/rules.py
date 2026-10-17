@@ -36,6 +36,13 @@ class ChangeKind(StrEnum):
     TYPE_NARROWED = "type_narrowed"
     TYPE_INTERCHANGEABLE = "type_interchangeable"
     TYPE_CHANGED = "type_changed"
+    LOGICAL_TYPE_ADDED = "logical_type_added"
+    LOGICAL_TYPE_REMOVED = "logical_type_removed"
+    LOGICAL_TYPE_CHANGED = "logical_type_changed"
+    LOGICAL_UNIT_CHANGED = "logical_unit_changed"
+    DECIMAL_SCALE_CHANGED = "decimal_scale_changed"
+    DECIMAL_PRECISION_WIDENED = "decimal_precision_widened"
+    DECIMAL_PRECISION_NARROWED = "decimal_precision_narrowed"
     CONTAINER_KIND_CHANGED = "container_kind_changed"
     NULLABILITY_ADDED = "nullability_added"
     NULLABILITY_REMOVED = "nullability_removed"
@@ -137,6 +144,55 @@ RULES: dict[ChangeKind, Rule] = {
         ChangeKind.TYPE_CHANGED,
         BOTH,
         "no promotion exists between the two types in either direction",
+    ),
+    ChangeKind.LOGICAL_TYPE_ADDED: _rule(
+        ChangeKind.LOGICAL_TYPE_ADDED,
+        BACKWARD,
+        "the old writer's numbers were never promised to mean what the annotation now says "
+        "they mean, and a reader on the new schema reads every one of them as if they were; "
+        "the old reader ignores an annotation it has never heard of and reads the number it "
+        "always read",
+    ),
+    ChangeKind.LOGICAL_TYPE_REMOVED: _rule(
+        ChangeKind.LOGICAL_TYPE_REMOVED,
+        FORWARD,
+        "the old reader still interprets the annotation and the new writer has stopped "
+        "promising to honour it; a reader on the new schema drops to the raw number, which "
+        "is always available to it",
+    ),
+    ChangeKind.LOGICAL_TYPE_CHANGED: _rule(
+        ChangeKind.LOGICAL_TYPE_CHANGED,
+        BOTH,
+        "the annotation over the same physical type now means something else, so each reader "
+        "parses the other side's values as the thing it expects and gets a wrong answer "
+        "rather than an error",
+    ),
+    ChangeKind.LOGICAL_UNIT_CHANGED: _rule(
+        ChangeKind.LOGICAL_UNIT_CHANGED,
+        BOTH,
+        "both units sit on the same physical type, so resolution succeeds in both directions "
+        "and every value already written is off by the factor between them; there is no "
+        "reader that survives this and no encoding under which it is harmless, which is why "
+        "it is not behind --strict",
+    ),
+    ChangeKind.DECIMAL_SCALE_CHANGED: _rule(
+        ChangeKind.DECIMAL_SCALE_CHANGED,
+        BOTH,
+        "scale is where the decimal point sits in the unscaled integer, so moving it moves "
+        "the point on every value already written; the bytes are the same width and the "
+        "number they decode to is wrong by a power of ten",
+    ),
+    ChangeKind.DECIMAL_PRECISION_WIDENED: _rule(
+        ChangeKind.DECIMAL_PRECISION_WIDENED,
+        FORWARD,
+        "the new writer is allowed a value with more digits than the old reader's precision "
+        "admits, and the old reader has nowhere to put it",
+    ),
+    ChangeKind.DECIMAL_PRECISION_NARROWED: _rule(
+        ChangeKind.DECIMAL_PRECISION_NARROWED,
+        BACKWARD,
+        "the old writer was allowed more digits than the new reader's precision admits, and "
+        "those values are already written",
     ),
     ChangeKind.CONTAINER_KIND_CHANGED: _rule(
         ChangeKind.CONTAINER_KIND_CHANGED,

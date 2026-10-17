@@ -91,9 +91,9 @@ jobs:
           cache: pip
       - run: pip install .
 
-      - name: 25 rules, 3 subjects, 7 versions, 6 consumers
+      - name: 32 rules, 3 subjects, 7 versions, 6 consumers
         run: |
-          contractlint rules | head -1 | grep -qx "25 rules"
+          contractlint rules | head -1 | grep -qx "32 rules"
           contractlint validate | grep -qx "3 subjects, 7 versions, 6 consumers"
 
       - name: a field coming back with another type fails against v1 and passes against v3

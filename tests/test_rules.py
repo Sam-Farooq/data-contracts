@@ -18,7 +18,7 @@ from contractlint.diff import diff_schemas
 from contractlint.rules import RULES, Change, ChangeKind
 from contractlint.types import Direction
 
-from .conftest import avro, doc, enum, field
+from .conftest import avro, dec, doc, enum, field, jdoc, ts
 
 BW = {Direction.BACKWARD}
 FW = {Direction.FORWARD}
@@ -153,6 +153,76 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any], tuple[ChangeKind, ...], s
         avro(field("x", "boolean")),
         avro(field("x", "int")),
         (K.TYPE_CHANGED,),
+        BOTH,
+    ),
+    (
+        "the same logical type on both sides is not a change",
+        avro(field("at", ts("millis"))),
+        avro(field("at", ts("millis"))),
+        (),
+        OK,
+    ),
+    (
+        "annotate a plain long",
+        avro(field("at", "long")),
+        avro(field("at", ts("millis"))),
+        (K.LOGICAL_TYPE_ADDED,),
+        BW,
+    ),
+    (
+        "drop the annotation from a long",
+        avro(field("at", ts("millis"))),
+        avro(field("at", "long")),
+        (K.LOGICAL_TYPE_REMOVED,),
+        FW,
+    ),
+    (
+        "change the timestamp unit from millis to micros",
+        avro(field("at", ts("millis"))),
+        avro(field("at", ts("micros"))),
+        (K.LOGICAL_UNIT_CHANGED,),
+        BOTH,
+    ),
+    (
+        "change the timestamp unit back from micros to millis",
+        avro(field("at", ts("micros"))),
+        avro(field("at", ts("millis"))),
+        (K.LOGICAL_UNIT_CHANGED,),
+        BOTH,
+    ),
+    (
+        "swap one logical type for another over the same long",
+        avro(field("at", {"type": "long", "logicalType": "time-micros"})),
+        avro(field("at", ts("micros"))),
+        (K.LOGICAL_TYPE_CHANGED,),
+        BOTH,
+    ),
+    (
+        "move a decimal's point",
+        avro(field("fee", dec(9, 2))),
+        avro(field("fee", dec(9, 4))),
+        (K.DECIMAL_SCALE_CHANGED,),
+        BOTH,
+    ),
+    (
+        "widen a decimal's precision",
+        avro(field("fee", dec(9, 2))),
+        avro(field("fee", dec(12, 2))),
+        (K.DECIMAL_PRECISION_WIDENED,),
+        FW,
+    ),
+    (
+        "narrow a decimal's precision",
+        avro(field("fee", dec(12, 2))),
+        avro(field("fee", dec(9, 2))),
+        (K.DECIMAL_PRECISION_NARROWED,),
+        BW,
+    ),
+    (
+        "move the point and widen the precision in one change",
+        avro(field("fee", dec(9, 2))),
+        avro(field("fee", dec(12, 3))),
+        (K.DECIMAL_SCALE_CHANGED, K.DECIMAL_PRECISION_WIDENED),
         BOTH,
     ),
     (
@@ -423,10 +493,81 @@ def test_a_change_inside_an_array_of_records_carries_the_container_marker():
     assert found[0].root_field == "hits"
 
 
-def test_a_logical_type_on_its_own_is_not_a_change():
-    old = avro(field("at", {"type": "long"}))
-    new = avro(field("at", {"type": "long", "logicalType": "timestamp-millis"}))
-    assert changes(old, new) == []
+def test_a_changed_unit_is_not_behind_strict():
+    """The issue's one hard case: there is no reading under which it is harmless."""
+    old = avro(field("at", ts("millis")))
+    new = avro(field("at", ts("micros")))
+    assert broken(old, new) == BOTH
+    assert broken(old, new, strict=True) == BOTH
+    assert not any(c.quiet for c in changes(old, new))
+
+
+def test_a_hyphenated_family_is_split_at_the_unit_and_not_at_the_first_hyphen():
+    """`local-timestamp-millis` is one family at one scale, which a naive split gets wrong."""
+    same_family = changes(
+        avro(field("at", {"type": "long", "logicalType": "local-timestamp-millis"})),
+        avro(field("at", {"type": "long", "logicalType": "local-timestamp-micros"})),
+    )
+    assert [c.kind for c in same_family] == [K.LOGICAL_UNIT_CHANGED]
+
+    other_family = changes(
+        avro(field("at", {"type": "long", "logicalType": "local-timestamp-millis"})),
+        avro(field("at", ts("millis"))),
+    )
+    assert [c.kind for c in other_family] == [K.LOGICAL_TYPE_CHANGED]
+
+
+def test_the_factor_in_the_detail_is_the_distance_between_the_units():
+    millis_to_micros = changes(avro(field("at", ts("millis"))), avro(field("at", ts("micros"))))
+    millis_to_nanos = changes(avro(field("at", ts("millis"))), avro(field("at", ts("nanos"))))
+    assert "a factor of 1000 " in millis_to_micros[0].detail
+    assert "a factor of 1000000 " in millis_to_nanos[0].detail
+
+
+def test_a_unit_change_inside_an_array_of_records_carries_the_path():
+    item_old = {"type": "record", "name": "E", "fields": [field("at", ts("millis"))]}
+    item_new = {"type": "record", "name": "E", "fields": [field("at", ts("micros"))]}
+    found = changes(
+        avro(field("events", {"type": "array", "items": item_old})),
+        avro(field("events", {"type": "array", "items": item_new})),
+    )
+    assert [(c.kind, c.path) for c in found] == [(K.LOGICAL_UNIT_CHANGED, "events[].at")]
+
+
+def test_an_annotation_change_is_reported_next_to_the_type_change_under_it():
+    """A long/timestamp-millis becoming a string loses both, and both are named."""
+    found = changes(
+        avro(field("at", ts("millis"))),
+        avro(field("at", "string")),
+    )
+    assert [c.kind for c in found] == [K.LOGICAL_TYPE_REMOVED, K.TYPE_CHANGED]
+
+
+def test_a_json_schema_format_change_is_compared_on_the_same_rule():
+    """`format` is this dialect's annotation, and it goes wrong the same way."""
+    old = jdoc(
+        {
+            "type": "object",
+            "properties": {"opened_at": {"type": "string", "format": "date-time"}},
+            "required": ["opened_at"],
+        }
+    )
+    new = jdoc(
+        {
+            "type": "object",
+            "properties": {"opened_at": {"type": "string", "format": "date"}},
+            "required": ["opened_at"],
+        }
+    )
+    found = diff_schemas(old, new)
+    assert [(c.kind, c.detail) for c in found] == [(K.LOGICAL_TYPE_CHANGED, "date-time -> date")]
+
+
+def test_the_decimal_rules_need_both_sides_to_be_decimals():
+    """A decimal becoming a plain bytes is the annotation going, not a scale change."""
+    found = changes(avro(field("fee", dec(9, 2))), avro(field("fee", "bytes")))
+    assert [c.kind for c in found] == [K.LOGICAL_TYPE_REMOVED]
+    assert found[0].detail == "bytes/decimal(9,2) -> bytes"
 
 
 def test_every_change_can_explain_itself():

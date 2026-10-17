@@ -225,19 +225,22 @@ def test_validate_exits_three_on_a_broken_registry(tmp_path):
 def test_rules_prints_every_rule_in_the_table():
     code, out, _ = run("rules")
     assert code == OK
-    assert out.startswith("25 rules")
+    assert out.startswith("32 rules")
     assert "field_removed_required" in out
     assert "breaks forward" in out
 
 
 def test_the_rules_json_is_the_table_itself():
     _code, payload = run_json("rules")
-    assert len(payload) == 25
+    assert len(payload) == 32
     removal = next(r for r in payload if r["kind"] == "field_removed_required")
     assert removal["breaks"] == ["forward"]
     quiet = next(r for r in payload if r["kind"] == "default_changed")
     assert quiet["breaks"] == []
     assert quiet["breaks_under_strict"] == ["backward"]
+    unit = next(r for r in payload if r["kind"] == "logical_unit_changed")
+    assert unit["breaks"] == ["backward", "forward"]
+    assert unit["breaks_under_strict"] == []
 
 
 # --- refusals --------------------------------------------------------------
