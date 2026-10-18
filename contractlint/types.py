@@ -73,6 +73,35 @@ def readable_as(writer: Kind, reader: Kind) -> bool:
     return reader in PROMOTIONS[writer]
 
 
+#: Units per second as a power of ten, for the logical types that spell their
+#: unit into their own name. The gap between two of them is the factor by which
+#: every value already written is misread when the unit changes under it.
+UNIT_EXPONENTS: dict[str, int] = {"millis": 3, "micros": 6, "nanos": 9}
+
+
+def split_logical(name: str) -> tuple[str, str | None]:
+    """A logical type name as (family, unit).
+
+    `timestamp-millis` and `timestamp-micros` are one family at two scales
+    rather than two unrelated annotations, and that distinction is the whole
+    reason a unit change is reported differently from a swapped annotation.
+    `date` and `date-time` carry no unit, so they come back with None.
+    """
+    family, _, tail = name.rpartition("-")
+    if family and tail in UNIT_EXPONENTS:
+        return family, tail
+    return name, None
+
+
+def unit_factor(one: str, other: str) -> int:
+    """How far apart two units are, as a plain multiplier.
+
+    Both names have to be units this module knows, which is what the caller
+    checks before asking.
+    """
+    return 10 ** abs(UNIT_EXPONENTS[one] - UNIT_EXPONENTS[other])
+
+
 class TypeNode(BaseModel):
     """A type, with nullability hoisted out of the union it came from."""
 
@@ -90,10 +119,16 @@ class TypeNode(BaseModel):
     items: TypeNode | None = None
     #: map only, the value type; map keys are strings in both dialects
     values: TypeNode | None = None
-    #: carried for display and never compared. A logical type is an annotation
-    #: over a physical one, and two schemas that disagree about it still
-    #: serialize and deserialize identically.
+    #: the annotation over the physical kind: `timestamp-millis` over a long, a
+    #: JSON Schema `format` over a string. Two schemas that disagree about it
+    #: serialize and deserialize identically, which is why it is compared here
+    #: rather than left to the kind comparison, which cannot see it.
     logical: str | None = None
+    #: decimal only: the total digits and the digits after the point. Both are
+    #: part of the type rather than an annotation over it, because the unscaled
+    #: integer on the wire means nothing without them.
+    precision: int | None = None
+    scale: int | None = None
     #: the declared name of a record or enum, for messages
     named: str | None = None
 
@@ -109,6 +144,8 @@ class TypeNode(BaseModel):
             base = f"record({len(self.fields)} fields)"
         if self.logical:
             base = f"{base}/{self.logical}"
+        if self.precision is not None:
+            base = f"{base}({self.precision},{self.scale})"
         return f"{base}?" if self.nullable else base
 
     def field_map(self) -> dict[str, FieldNode]:

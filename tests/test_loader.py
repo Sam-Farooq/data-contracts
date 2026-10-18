@@ -42,6 +42,72 @@ def test_a_logical_type_is_carried_but_the_kind_is_the_physical_one():
     assert d.root.fields[0].type.logical == "timestamp-millis"
 
 
+def test_a_decimal_carries_its_precision_and_scale():
+    d = doc(
+        avro(
+            field(
+                "fee",
+                {"type": "bytes", "logicalType": "decimal", "precision": 9, "scale": 2},
+            )
+        )
+    )
+    t = d.root.fields[0].type
+    assert t.kind is Kind.BYTES
+    assert t.logical == "decimal"
+    assert (t.precision, t.scale) == (9, 2)
+    assert t.label() == "bytes/decimal(9,2)"
+
+
+def test_a_decimal_scale_defaults_to_zero():
+    """The specification says so, so this is the spec rather than a guess."""
+    d = doc(avro(field("fee", {"type": "bytes", "logicalType": "decimal", "precision": 4})))
+    assert d.root.fields[0].type.scale == 0
+
+
+def test_a_nullable_decimal_keeps_its_digits_through_the_union():
+    d = doc(
+        avro(
+            field(
+                "fee",
+                ["null", {"type": "bytes", "logicalType": "decimal", "precision": 6, "scale": 3}],
+                default=None,
+            )
+        )
+    )
+    t = d.root.fields[0].type
+    assert t.nullable is True
+    assert (t.precision, t.scale) == (6, 3)
+
+
+@pytest.mark.parametrize(
+    ("node", "fragment"),
+    [
+        ({"type": "bytes", "logicalType": "decimal"}, "needs an integer precision"),
+        (
+            {"type": "bytes", "logicalType": "decimal", "precision": "9"},
+            "needs an integer precision",
+        ),
+        ({"type": "bytes", "logicalType": "decimal", "precision": 0}, "must be at least 1"),
+        (
+            {"type": "bytes", "logicalType": "decimal", "precision": 9, "scale": "2"},
+            "scale must be an integer",
+        ),
+        (
+            {"type": "bytes", "logicalType": "decimal", "precision": 9, "scale": -1},
+            "between 0 and its precision 9",
+        ),
+        (
+            {"type": "bytes", "logicalType": "decimal", "precision": 9, "scale": 10},
+            "between 0 and its precision 9",
+        ),
+    ],
+)
+def test_a_decimal_without_usable_digits_is_refused(node, fragment):
+    with pytest.raises(SchemaError) as exc:
+        doc(avro(field("fee", node)))
+    assert fragment in str(exc.value)
+
+
 def test_an_enum_keeps_symbol_order_and_its_default():
     d = doc(avro(field("c", enum("CARD", "TRANSFER", default="CARD"))))
     t = d.root.fields[0].type

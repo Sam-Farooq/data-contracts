@@ -78,17 +78,23 @@ default when they do not, and fails when there is neither. So:
   the reader on the other side declares a fallback symbol
 - changing a default breaks nothing and changes what a missing value means, which
   is reported and is not a failure unless you ask for `--strict`
+- a logical type is an annotation over a physical one, so resolution never
+  objects to one: adding it breaks backward, removing it breaks forward, and
+  changing the unit under it breaks both without failing to parse
 
 `contractlint rules` prints all of it, which is the version that cannot go stale.
 
 ## The rule table
 
-25 rules. `--strict` is for the changes where resolution keeps working and a
+32 rules. `--strict` is for the changes where resolution keeps working and a
 reader observes a value it would not have seen before.
 
 | change | breaks | --strict |
 |---|---|---|
 | container_kind_changed | backward, forward | |
+| decimal_precision_narrowed | backward | |
+| decimal_precision_widened | forward | |
+| decimal_scale_changed | backward, forward | |
 | default_added | nothing | |
 | default_changed | nothing | backward |
 | default_removed | nothing | |
@@ -107,6 +113,10 @@ reader observes a value it would not have seen before.
 | field_renamed_with_alias | forward | |
 | field_reordered | nothing | |
 | likely_rename | nothing | |
+| logical_type_added | backward | |
+| logical_type_changed | backward, forward | |
+| logical_type_removed | forward | |
+| logical_unit_changed | backward, forward | |
 | nullability_added | forward | |
 | nullability_removed | backward | |
 | type_changed | backward, forward | |
@@ -114,7 +124,19 @@ reader observes a value it would not have seen before.
 | type_narrowed | backward | |
 | type_widened | forward | |
 
-Four of those are worth more than a row.
+Five of those are worth more than a row.
+
+**`logical_unit_changed`** is the one row where a clean resolution is the problem.
+`timestamp-millis` and `timestamp-micros` are both a `long`, so every structural
+check passes and a reader on the wrong one is out by a factor of 1000: a 2026
+timestamp read as the other unit lands in 1970 or in the far future, populated
+and plausibly typed. There is no reader that survives it and no encoding under
+which it is harmless, which is why it breaks both directions outright instead of
+sitting behind `--strict`. The unit is the trailing word, so
+`local-timestamp-millis` becoming `timestamp-millis` is a changed family rather
+than a changed unit, and `decimal` carries its scale and precision as part of
+the type: moving the point leaves the bytes the same width and the number wrong
+by a power of ten.
 
 **`enum_symbols_reindexed`** is not about resolution at all. The binary encoding
 writes an enum as the index of its symbol, so moving one remaps every value
@@ -274,8 +296,9 @@ The two that change results:
 
 Both loaders refuse rather than guess. `$ref`, `oneOf`, `anyOf`, `allOf`, a
 multi-branch union, an object with neither properties nor an
-`additionalProperties` schema, and a named type reference all raise with the path
-they gave up on. A checker that silently ignores indirection compares two things
+`additionalProperties` schema, a named type reference, and a `decimal` with no
+precision or a scale past its own precision all raise with the path they gave up
+on. A checker that silently ignores indirection compares two things
 that are not the schemas.
 
 ## In a pipeline
@@ -343,13 +366,13 @@ and sorted keys, so a build can diff it.
 ## Tests
 
 ```bash
-pytest -q                 # 233 tests, no network, no broker, no service
+pytest -q                 # 258 tests, no network, no broker, no service
 ruff check . && ruff format --check .
 ```
 
-39 of those are rows in one table in `tests/test_rules.py`: a concrete schema
+49 of those are rows in one table in `tests/test_rules.py`: a concrete schema
 pair, the change kinds it should produce, and the directions it should break.
-There is a test asserting that every one of the 25 rules has at least one row,
+There is a test asserting that every one of the 32 rules has at least one row,
 because a rule nobody wrote a case for is a rule nobody has checked.
 
 The rest covers what the loaders refuse, the transitive comparison, consumer
@@ -367,7 +390,8 @@ four exit codes. Nothing opens a socket, because nothing in the design wants to.
   says no.
 - **No named type references, no recursion, no `fixed`.** Each file is read on
   its own, so a type defined once and referenced by name elsewhere is not
-  resolved.
+  resolved. A `decimal` is therefore read over `bytes` and not over `fixed`, and
+  `duration`, which only exists over `fixed`, is not read at all.
 - **No Protobuf.** Field numbers rather than names change every rule in the
   table, which makes it a different tool rather than a third loader.
 - **No history.** There is no state anywhere: no registry server, no id per
@@ -390,10 +414,20 @@ four exit codes. Nothing opens a socket, because nothing in the design wants to.
   reader that falls back now observes a different value. Calling that a
   compatibility break is a judgement rather than schema resolution, so it lives
   behind `--strict`.
-- **Logical types are carried and never compared.** Two schemas that disagree
-  about `timestamp-millis` still serialize the same long, so nothing is reported.
-  A consumer reading one as the other is wrong by three orders of magnitude and
-  this will not say a word.
+- **A JSON Schema `format` is compared as if it bound the value.** The
+  specification calls `format` an annotation, and a document may declare
+  `date-time` while every validator in the path ignores it. A changed `format` is
+  reported here as a changed meaning, which is right for a consumer that parses
+  by it and strict for one that does not. The dialect has no second place to put
+  the rule, and the alternative is the silence the Avro side used to have.
+- **Decimal precision is read as range.** Avro resolves on the physical type and
+  never on precision, so a reader handed more digits than it declared gets
+  whatever its own decimal library does with them. Widening is reported as a
+  forward break on that reading, which is stricter than the serializer. Scale is
+  the one that is wrong in every library, and it breaks both directions.
+- **A logical type over a named or recursive type is not seen at all**, because
+  neither is resolved. What is compared is the annotation on a primitive, an
+  array's items, or a map's values.
 - **Enum reindexing is reported as breaking on the assumption of a binary
   encoding.** Under a JSON encoding on the Avro side it is harmless, and that
   case is not distinguished.

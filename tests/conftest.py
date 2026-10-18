@@ -33,6 +33,16 @@ def enum(*symbols: str, default: str | None = None, name: str = "E") -> dict[str
     return node
 
 
+def ts(unit: str) -> dict[str, Any]:
+    """A long annotated as a timestamp at one unit: millis, micros or nanos."""
+    return {"type": "long", "logicalType": f"timestamp-{unit}"}
+
+
+def dec(precision: int, scale: int) -> dict[str, Any]:
+    """A decimal over bytes, with the two numbers that give it a value."""
+    return {"type": "bytes", "logicalType": "decimal", "precision": precision, "scale": scale}
+
+
 def doc(obj: dict[str, Any], *, subject: str = "test.subject", version: int = 1) -> SchemaDoc:
     """Normalize an Avro-style dict into a SchemaDoc."""
     return load_schema_obj(obj, dialect="avro", subject=subject, version=version)
